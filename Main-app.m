@@ -25,6 +25,14 @@ data.ax = axes('Parent', fig, 'Units', 'pixels', 'Position', [270, 150, 860, 500
 axis(data.ax, 'off');
 title(data.ax, 'No Image Loaded');
 
+% Add a program title in the middle of the main axes
+programTitle = annotation(fig, 'textbox', [0.17, 0.55, 0.9, 0.05], ...
+    'String', 'Underwater Image Enhancement and Object Detection', ...
+    'FontSize', 25, 'Color', 'blue', 'HorizontalAlignment', 'center', ...
+    'EdgeColor', 'none', 'FontName', 'Poppins'); % Change font style to Arial
+% Store the handle to the program title in the data structure
+data.programTitle = programTitle;
+
 % Panel for thumbnails (2-column layout)
 data.thumbPanel = uipanel('Parent', fig, 'Title', 'Steps', 'FontSize', 10, ...
     'Position', [0.005, 0.02, 0.23, 0.94]);
@@ -57,6 +65,11 @@ function selectImage(fig)
 
     imagePath = fullfile(path, file);
     data.org_img = imread(imagePath);
+
+    % Remove the program title
+    if ishandle(data.programTitle)
+        delete(data.programTitle);
+    end
 
     cla(data.ax);
     imshow(data.org_img, 'Parent', data.ax);
