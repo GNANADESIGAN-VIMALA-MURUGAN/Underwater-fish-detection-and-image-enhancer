@@ -2,25 +2,9 @@ clc; clear; close all;
 
 % Paths
 modelPath = 'best.pt';  % Replace with the path to your YOLOv8 .pt model
-outputPath = 'output_image.jpg'; % Path to save the annotated image
-
-% Allow the user to select an image file interactively
-[file, path] = uigetfile({'*.jpg;*.jpeg;*.png;*.bmp', 'Image Files (*.jpg, *.jpeg, *.png, *.bmp)'}, ...
-    'Select an Image File');
-
-% Check if the user canceled the selection
-if isequal(file, 0) || isequal(path, 0)
-    disp('User canceled the image selection. Exiting...');
-    return;
-end
-
-% Construct the full file path
-imagePath = fullfile(path, file);
-
-% Read the selected input image
-data.org_img = imread(imagePath);
 
 % Initialize variables for processing steps
+data.org_img = [];
 data.red_comp_img = [];
 data.wb_img = [];
 data.gamma_crct_img = [];
@@ -30,102 +14,221 @@ data.edges = [];
 data.dilated_img = [];
 data.filled_img = [];
 data.modelPath = modelPath;
-data.outputPath = outputPath;
+data.outputPath = '';  % Will be set with unique name later
 
 % Create a figure window for displaying images and buttons
 fig = figure('Name', 'Image Processing Pipeline', 'NumberTitle', 'off', ...
-    'Position', [100, 100, 800, 600], 'MenuBar', 'none', 'ToolBar', 'none');
-axis off;
+    'Position', [100, 100, 1150, 700], 'MenuBar', 'none', 'ToolBar', 'none');
 
-% Create an axes inside the figure for displaying images
-data.ax = axes('Parent', fig, 'Position', [0.1, 0.2, 0.8, 0.7]);
+% Axes for main image
+data.ax = axes('Parent', fig, 'Units', 'pixels', 'Position', [270, 150, 860, 500]);
 axis(data.ax, 'off');
+title(data.ax, 'No Image Loaded');
 
-% Initialize the step counter
-data.stepCounter = 1;
+% Panel for thumbnails (2-column layout)
+data.thumbPanel = uipanel('Parent', fig, 'Title', 'Steps', 'FontSize', 10, ...
+    'Position', [0.005, 0.02, 0.23, 0.94]);
+data.thumbAxes = {};
 
-% Create a Next button
+% Buttons
+uicontrol('Style', 'pushbutton', 'String', 'Select Image', 'FontSize', 12, ...
+    'Position', [480, 40, 120, 40], 'Callback', @(~,~) selectImage(fig));
+
 data.nextButton = uicontrol('Style', 'pushbutton', 'String', 'Next', ...
-    'Position', [300, 10, 200, 40], 'Callback', @(src, event) nextStep(fig));
+    'FontSize', 12, 'Position', [800, 40, 100, 40], 'Callback', @(~,~) nextStep(fig), 'Enable', 'off');
 
-% Store data using guidata
+data.backButton = uicontrol('Style', 'pushbutton', 'String', 'Back', ...
+    'FontSize', 12, 'Position', [650, 40, 100, 40], 'Callback', @(~,~) backStep(fig), 'Enable', 'off');
+
+% Step tracker
+data.stepCounter = 1;
 guidata(fig, data);
 
-% Display the initial input image
-imshow(data.org_img, 'Parent', data.ax);
-title(data.ax, 'Input Image');
-drawnow;
+%% ======== SELECT IMAGE Button Function ========
+function selectImage(fig)
+    data = guidata(fig);
+    [file, path] = uigetfile({'*.jpg;*.jpeg;*.png;*.bmp', 'Image Files (*.jpg, *.jpeg, *.png, *.bmp)'}, ...
+        'Select an Image File');
 
-% Function to handle the "Next" button click
+    if isequal(file, 0) || isequal(path, 0)
+        disp('User canceled the image selection.');
+        return;
+    end
+
+    imagePath = fullfile(path, file);
+    data.org_img = imread(imagePath);
+
+    cla(data.ax);
+    imshow(data.org_img, 'Parent', data.ax);
+    title(data.ax, 'Input Image');
+
+    % Reset thumbnails and step counter
+    for i = 1:length(data.thumbAxes)
+        delete(data.thumbAxes{i});
+    end
+    data.thumbAxes = {};
+
+    data = storeThumbnail(fig, data, data.org_img, 'Input Image');
+    data.stepCounter = 1;
+
+    set(data.nextButton, 'Enable', 'on');
+    set(data.backButton, 'Enable', 'off');
+    guidata(fig, data);
+    drawnow;
+end
+
+%% ======== NEXT Button Function ========
 function nextStep(fig)
     data = guidata(fig);
-    
+
     switch data.stepCounter
-        case 1
+        case 1  % Red Compensation
             data.red_comp_img = redCompensate(data.org_img, 5);
-            imshow(data.red_comp_img, 'Parent', data.ax);
-            title(data.ax, 'Red Compensated Image');
-        
-        case 2
+            imgToShow = data.red_comp_img;
+            titleText = 'Red Compensated Image';
+
+        case 2  % White Balance
             data.wb_img = gray_balance(data.red_comp_img);
-            imshow(data.wb_img, 'Parent', data.ax);
-            title(data.ax, 'White Balanced Image');
-        
-        case 3
-            alpha = 1;
-            gamma = 1.2;
+            imgToShow = data.wb_img;
+            titleText = 'White Balanced Image';
+
+        case 3  % Gamma Correction
+            alpha = 1; gamma = 1.2;
             data.gamma_crct_img = gammaCorrection(data.wb_img, alpha, gamma);
-            imshow(data.gamma_crct_img, 'Parent', data.ax);
-            title(data.ax, 'Gamma Corrected Image');
-        
-        case 4
+            imgToShow = data.gamma_crct_img;
+            titleText = 'Enhanced Image';
+
+        case 4  % Sharpening
             data.sharpen_img = sharp(data.gamma_crct_img);
-            imshow(data.sharpen_img, 'Parent', data.ax);
-            title(data.ax, 'Sharpened Image');
-        
-        case 5
+            imgToShow = data.sharpen_img;
+            titleText = 'Sharpened Image';
+
+        case 5  % Grayscale
             data.gray_img = rgb2gray(data.sharpen_img);
-            imshow(data.gray_img, 'Parent', data.ax);
-            title(data.ax, 'Grayscale Image');
-        
-        case 6
+            imgToShow = data.gray_img;
+            titleText = 'Grayscale Image';
+
+        case 6  % Edge Detection
             data.edges = edge(data.gray_img, 'Canny');
-            imshow(data.edges, 'Parent', data.ax);
-            title(data.ax, 'Edge Detection');
-        
-        case 7
+            imgToShow = data.edges;
+            titleText = 'Edge Detection';
+
+        case 7  % Morphology
             se = strel('disk', 3);
             data.dilated_img = imdilate(data.edges, se);
             data.filled_img = imfill(data.dilated_img, 'holes');
-            imshow(data.filled_img, 'Parent', data.ax);
-            title(data.ax, 'Morphologically Processed Image');
-        
-        case 8
-            tempImagePath = 'temp_gamma_corrected_image.jpg';
+            imgToShow = data.filled_img;
+            titleText = 'Morphologically Processed Image';
+
+        case 8  % YOLOv8 Detection on Enhanced Image
+            % Generate unique filenames using timestamp
+            timestamp = datestr(now, 'yyyymmdd_HHMMSS');
+            tempImagePath = ['temp_gamma_corrected_image_', timestamp, '.jpg'];
+            uniqueOutputPath = ['output_image_', timestamp, '.jpg'];
             imwrite(data.gamma_crct_img, tempImagePath);
 
             try
                 yolov8 = py.ultralytics.YOLO(data.modelPath);
                 results = yolov8(tempImagePath);
-            catch
-                error('Failed to load YOLOv8 model. Ensure the Python environment is configured.');
-            end
-
-            for i = 1:length(results)
-                annotatedImage = results{i}.plot();
-                annotatedImageMatlab = uint8(annotatedImage);
-                imshow(annotatedImageMatlab, 'Parent', data.ax);
-                title(data.ax, 'Final Result');
-                imwrite(annotatedImageMatlab, data.outputPath);
-                disp(['Annotated image saved to: ', data.outputPath]);
+                results{1}.save(uniqueOutputPath);
+                imgToShow = imread(uniqueOutputPath);
+                titleText = 'Final Result';
+                disp(['Annotated image saved to: ', uniqueOutputPath]);
+                data.outputPath = uniqueOutputPath;  % Save path in data
+            catch ME
+                error(['Failed to load YOLOv8 model or process image. Details: ', ME.message]);
             end
 
             delete(tempImagePath);
             set(data.nextButton, 'Enable', 'off');
-            disp('Processing complete.');
+            set(data.backButton, 'Enable', 'off');
+
+        otherwise
+            return;
     end
 
+    imshow(imgToShow, 'Parent', data.ax);
+    title(data.ax, titleText);
+    data = storeThumbnail(fig, data, imgToShow, titleText);
+
     data.stepCounter = data.stepCounter + 1;
+    if data.stepCounter > 1
+        set(data.backButton, 'Enable', 'on');
+    end
     guidata(fig, data);
+    drawnow;
+end
+
+%% ======== BACK Button Function ========
+function backStep(fig)
+    data = guidata(fig);
+    data.stepCounter = data.stepCounter - 1;
+
+    switch data.stepCounter
+        case 1
+            imgToShow = data.org_img;
+            titleText = 'Input Image';
+        case 2
+            imgToShow = data.red_comp_img;
+            titleText = 'Red Compensated Image';
+        case 3
+            imgToShow = data.wb_img;
+            titleText = 'White Balanced Image';
+        case 4
+            imgToShow = data.gamma_crct_img;
+            titleText = 'Enhanced Image';
+        case 5
+            imgToShow = data.sharpen_img;
+            titleText = 'Sharpened Image';
+        case 6
+            imgToShow = data.gray_img;
+            titleText = 'Grayscale Image';
+        case 7
+            imgToShow = data.edges;
+            titleText = 'Edge Detection';
+        case 8
+            imgToShow = data.filled_img;
+            titleText = 'Morphologically Processed Image';
+    end
+
+    imshow(imgToShow, 'Parent', data.ax);
+    title(data.ax, titleText);
+
+    if data.stepCounter == 1
+        set(data.backButton, 'Enable', 'off');
+    end
+    set(data.nextButton, 'Enable', 'on');
+    guidata(fig, data);
+    drawnow;
+end
+
+%% ======== Store Thumbnail (2 Columns) ========
+function data = storeThumbnail(fig, data, img, stepTitle)
+    thumbSize = [100, 100];
+    thumbImg = imresize(img, thumbSize);
+
+    idx = numel(data.thumbAxes) + 1;
+    col = mod(idx-1, 2);
+    row = floor((idx-1)/2);
+
+    xPos = 10 + col * 110;
+    yPos = 520 - row * 120;
+
+    ax = axes('Parent', data.thumbPanel, 'Units', 'pixels', ...
+        'Position', [xPos, yPos, 100, 100], 'XTick', [], 'YTick', []);
+    hImg = imshow(thumbImg, 'Parent', ax);
+    title(ax, num2str(idx), 'FontSize', 8);
+
+    set(hImg, 'ButtonDownFcn', @(~,~) showImage(fig, img, stepTitle));
+    set(ax, 'ButtonDownFcn', @(~,~) showImage(fig, img, stepTitle));
+
+    data.thumbAxes{end+1} = ax;
+end
+
+%% ======== Show Full Image from Thumbnail ========
+function showImage(fig, img, stepTitle)
+    data = guidata(fig);
+    imshow(img, 'Parent', data.ax);
+    title(data.ax, stepTitle);
     drawnow;
 end
