@@ -1,54 +1,40 @@
-
 function [result] = sharp(img)
-img = im2double(img);
-GaussKernel = fspecial('gaussian', 5, 3);
-imBlur = imfilter(img,GaussKernel);
-unSharpMask = img - imBlur;
-stretchIm = hisStretching(unSharpMask);
-result = (img + stretchIm)/2;
+    % Ensure the input image is in double format
+    img = im2double(img);
+    
+    % Create a Gaussian kernel for blurring (smaller kernel size and lower sigma)
+    GaussKernel = fspecial('gaussian', [3, 3], 1); % Reduced kernel size and sigma
+    
+    % Apply Gaussian blur to the image
+    imBlur = imfilter(img, GaussKernel, 'replicate');
+    
+    % Compute the unsharp mask
+    unSharpMask = img - imBlur;
+    
+    % Enhance the unsharp mask by scaling it (adjust factor as needed)
+    enhancementFactor = 2.5; % Increase sharpness (higher value for stronger effect)
+    enhancedMask = unSharpMask * enhancementFactor;
+    
+    % Combine the original image with the enhanced unsharp mask
+    result = img + enhancedMask;
+    
+    % Clip values to ensure they remain within the valid range [0, 1]
+    result = max(0, min(result, 1));
 end
 
 function [result] = hisStretching(img)
-img=im2double(img);
-[M,N,~] = size(img);
-
-r=img(:,:,1);
-g=img(:,:,2);
-b=img(:,:,3);
-
-maxR=zeros(1,1);
-maxG=zeros(1,1);
-maxB=zeros(1,1);
-minR=ones(1,1);
-minG=ones(1,1);
-minB=ones(1,1);
-for i=1:M
-    for j=1:N
-        if(r(i,j) < minR(1,1))
-            minR(1,1) = r(i,j);
-        else
-            maxR(1,1) = r(i,j);
-        end
-        
-        if(g(i,j) < minG(1,1))
-            minG(1,1) = g(i,j);
-        else
-            maxG(1,1) = g(i,j);
-        end
-        
-        if(b(i,j)<minB(1,1))
-            minB(1,1)=b(i,j);
-        else
-            maxB(1,1)=b(i,j);
-        end
+    % Ensure the input image is in double format
+    img = im2double(img);
+    
+    % Apply histogram stretching using rescale (simplifies the process)
+    if size(img, 3) == 3
+        % For RGB images, stretch each channel separately
+        r = rescale(img(:, :, 1));
+        g = rescale(img(:, :, 2));
+        b = rescale(img(:, :, 3));
+        result = cat(3, r, g, b);
+    else
+        % For grayscale images, stretch directly
+        result = rescale(img);
     end
-end
-for i=1:M
-    for j=1:N
-        r(i,j)=(r(i,j)-minR(1,1))/(maxR(1,1)-minR(1,1));
-        g(i,j)=(g(i,j)-minG(1,1))/(maxG(1,1)-minG(1,1));
-        b(i,j)=(b(i,j)-minB(1,1))/(maxB(1,1)-minB(1,1));
-    end
-end
-result = cat(3, r, g, b);
 end
