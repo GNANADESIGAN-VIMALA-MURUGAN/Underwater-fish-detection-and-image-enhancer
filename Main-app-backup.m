@@ -26,6 +26,7 @@ data.dilated_img = [];
 data.filled_img = [];
 data.modelPath = modelPath;
 data.outputPath = '';
+data.programTitle = [];  % Initialize programTitle
 
 % Create GUI
 fig = figure('Name', 'Image Processing Pipeline', 'NumberTitle', 'off', ...
@@ -36,7 +37,6 @@ data.ax = axes('Parent', fig, 'Units', 'pixels', 'Position', [270, 150, 860, 500
 axis(data.ax, 'off');
 title(data.ax, 'Input Image');
 imshow(org_img, 'Parent', data.ax);
-
 
 % Thumbnail panel
 data.thumbPanel = uipanel('Parent', fig, 'Title', 'Steps', 'FontSize', 10, ...
@@ -83,8 +83,9 @@ function selectImage(fig)
     data.org_img = imread(imagePath);
 
     % Remove the program title
-    if ishandle(data.programTitle)
+    if isfield(data, 'programTitle') && ~isempty(data.programTitle) && ishandle(data.programTitle)
         delete(data.programTitle);
+        data.programTitle = [];  % Reset programTitle after deletion
     end
 
     cla(data.ax);
