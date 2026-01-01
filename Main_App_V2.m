@@ -1,0 +1,360 @@
+clc; clear; close all;
+% ===== Global counter persistence =====
+counterFile = 'global_counter.mat';
+
+if exist(counterFile, 'file')
+    S = load(counterFile);
+    globalCounter = S.globalCounter;
+else
+    globalCounter = 0;
+end
+
+
+% ======== Select Image FIRST ========
+[file, path] = uigetfile({'*.jpg;*.jpeg;*.png;*.bmp', 'Image Files (*.jpg, *.jpeg, *.png, *.bmp)'}, 'Select an Image File');
+
+if isequal(file, 0) || isequal(path, 0)
+    disp('User canceled the image selection. Exiting...');
+    return;
+end
+
+imagePath = fullfile(path, file);
+org_img = imread(imagePath);
+
+% ======== Now Initialize GUI ========
+modelPath = 'best.pt';  % YOLOv8 .pt model path
+
+% Initialize data struct
+data.org_img = org_img;
+data.red_comp_img = [];
+data.wb_img = [];
+data.gamma_crct_img = [];
+data.sharpen_img = [];
+data.gray_img = [];
+data.edges = [];
+data.dilated_img = [];
+data.filled_img = [];
+data.modelPath = modelPath;
+data.outputPath = '';
+data.programTitle = [];
+data.globalCounter = globalCounter;
+data.counterFile = counterFile;
+
+
+
+% Create GUI
+fig = figure('Name', 'Image Processing Pipeline', 'NumberTitle', 'off', ...
+    'Position', [100, 100, 1150, 700], 'MenuBar', 'none', 'ToolBar', 'none');
+
+% Main image axes
+data.ax = axes('Parent', fig, 'Units', 'pixels', 'Position', [270, 150, 860, 500]);
+axis(data.ax, 'off');
+title(data.ax, 'Input Image');
+imshow(org_img, 'Parent', data.ax);
+
+% Thumbnail panel
+data.thumbPanel = uipanel('Parent', fig, 'Title', 'Steps', 'FontSize', 10, ...
+    'Position', [0.005, 0.02, 0.23, 0.94]);
+data.thumbAxes = {};
+
+% Buttons
+uicontrol('Style', 'pushbutton', 'String', 'Select Image', 'FontSize', 12, ...
+    'Position', [480, 40, 120, 40], 'Callback', @(~,~) selectImage(fig));
+
+data.nextButton = uicontrol('Style', 'pushbutton', 'String', 'Next', 'FontSize', 12, ...
+    'Position', [800, 40, 100, 40], 'Callback', @(~,~) nextStep(fig), 'Enable', 'on');
+
+data.backButton = uicontrol('Style', 'pushbutton', 'String', 'Back', 'FontSize', 12, ...
+    'Position', [650, 40, 100, 40], 'Callback', @(~,~) backStep(fig), 'Enable', 'off');
+
+% Store thumbnail for input image
+data = storeThumbnail(fig, data, org_img, 'Input Image');
+
+% Show image title correctly
+imshow(org_img, 'Parent', data.ax);
+title(data.ax, 'Input Image');
+
+% Initialize step counter
+data.stepCounter = 1;
+guidata(fig, data);
+drawnow;
+
+% ======== Remainder of the functions (selectImage, nextStep, backStep, etc.) remain unchanged ========
+
+
+%% ======== SELECT IMAGE Button Function ========
+function selectImage(fig)
+    data = guidata(fig);
+    [file, path] = uigetfile({'*.jpg;*.jpeg;*.png;*.bmp', 'Image Files (*.jpg, *.jpeg, *.png, *.bmp)'}, ...
+        'Select an Image File');
+
+    if isequal(file, 0) || isequal(path, 0)
+        disp('User canceled the image selection.');
+        return;
+    end
+
+    imagePath = fullfile(path, file);
+    data.org_img = imread(imagePath);
+
+    % Remove the program title
+    if isfield(data, 'programTitle') && ~isempty(data.programTitle) && ishandle(data.programTitle)
+        delete(data.programTitle);
+        data.programTitle = [];  % Reset programTitle after deletion
+    end
+
+    cla(data.ax);
+    imshow(data.org_img, 'Parent', data.ax);
+    title(data.ax, 'Input Image');
+
+    % Reset thumbnails and step counter
+    for i = 1:length(data.thumbAxes)
+        delete(data.thumbAxes{i});
+    end
+    data.thumbAxes = {};
+
+    data = storeThumbnail(fig, data, data.org_img, 'Input Image');
+    data.stepCounter = 1;
+
+    set(data.nextButton, 'Enable', 'on');
+    set(data.backButton, 'Enable', 'off');
+    guidata(fig, data);
+    drawnow;
+end
+
+%% ======== NEXT Button Function ========
+function nextStep(fig)
+    data = guidata(fig);
+
+    switch data.stepCounter
+        case 1  % Red Compensation
+            data.red_comp_img = redCompensate(data.org_img, 5);
+            imgToShow = data.red_comp_img;
+            titleText = 'Red Compensated Image';
+
+        case 2  % White Balance
+            data.wb_img = gray_balance(data.red_comp_img);
+            imgToShow = data.wb_img;
+            titleText = 'White Balanced Image';
+
+        case 3  % Gamma Correction
+            alpha = 1; gamma = 1.2;
+            data.gamma_crct_img = gammaCorrection(data.wb_img, alpha, gamma);
+            imgToShow = data.gamma_crct_img;
+            titleText = 'Enhanced Image';
+
+        case 4  % Sharpening
+            data.sharpen_img = sharp(data.gamma_crct_img);
+            imgToShow = data.sharpen_img;
+            titleText = 'Sharpened Image';
+
+        case 5  % Grayscale
+            data.gray_img = rgb2gray(data.sharpen_img);
+            imgToShow = data.gray_img;
+            titleText = 'Grayscale Image';
+
+        case 6  % Edge Detection
+            data.edges = edge(data.gray_img, 'Canny');
+            imgToShow = data.edges;
+            titleText = 'Edge Detection';
+
+        case 7  % Morphology
+            se = strel('disk', 3);
+            data.dilated_img = imdilate(data.edges, se);
+            data.filled_img = imfill(data.dilated_img, 'holes');
+            imgToShow = data.filled_img;
+            titleText = 'Morphologically Processed Image';
+
+            case 8  % YOLOv8 Detection on Enhanced Image
+            
+                % ===== Output folder =====
+                outputDir = fullfile(pwd, 'output');
+                if ~exist(outputDir, 'dir')
+                    mkdir(outputDir);
+                end
+            
+                % ===== Date =====
+                t = clock;
+                dateStr = sprintf('%02d-%02d-%04d', t(3), t(2), t(1));
+            
+                % ===== Temporary image =====
+                tempImagePath = fullfile(outputDir, 'temp_input.jpg');
+                imwrite(data.gamma_crct_img, tempImagePath);
+            
+                try
+                    % ===== Load YOLO =====
+                    ultra = py.importlib.import_module('ultralytics');
+                    model = ultra.YOLO(data.modelPath);
+            
+                    % ===== Detect =====
+                    results = model(tempImagePath);
+                    boxes = results{1}.boxes;
+            
+                    % ===== NO DETECTION CASE =====
+                 if boxes.cls.numel() == 0
+                    data.globalCounter = data.globalCounter + 1;
+                
+                    outputFileName = sprintf('%d_no_detection_%s.jpg', ...
+                        data.globalCounter, dateStr);
+                
+                    outputPath = fullfile(outputDir, outputFileName);
+                    imwrite(data.gamma_crct_img, outputPath);
+                
+                    imgToShow = data.gamma_crct_img;
+                    titleText = 'No object detected';
+                
+                    data.outputPath = outputPath;
+                
+                    % ===== GUI UPDATE (THIS WAS MISSING) =====
+                    imshow(imgToShow, 'Parent', data.ax);
+                    title(data.ax, titleText);
+                    data = storeThumbnail(fig, data, imgToShow, titleText);
+                
+                    % ===== Disable buttons =====
+                    set(data.nextButton,'Enable','off');
+                    set(data.backButton,'Enable','off');
+                
+                    guidata(fig, data);
+                    drawnow;
+                
+                    delete(tempImagePath);
+                    disp(['Saved (no detection): ', outputPath]);
+                    return;
+                end
+
+            
+                    % ===== Convert classes to MATLAB list =====
+                    clsList = boxes.cls.tolist();   % Python list
+                    clsList = cellfun(@double, cell(clsList));
+            
+                    % ===== Get class names =====
+                    pyNames = results{1}.names;
+            
+                    % ===== Count detections per class =====
+                    uniqueCls = unique(clsList);
+                    summaryText = "";
+            
+                    for i = 1:numel(uniqueCls)
+                        clsIdx = uniqueCls(i);
+                        count = sum(clsList == clsIdx);
+            
+                        className = lower(string(pyNames.get(py.int(clsIdx))));
+                        summaryText = summaryText + sprintf('%d %s, ', count, className);
+            
+                        % ===== Increment global counter =====
+                        data.globalCounter = data.globalCounter + 1;
+            
+                        % ===== Save file =====
+                        outputFileName = sprintf('%d_%d_%s_%s.jpg', ...
+                            data.globalCounter, count, className, dateStr);
+            
+                        outputPath = fullfile(outputDir, outputFileName);
+                        results{1}.save(outputPath);
+            
+                        disp(['Saved: ', outputPath]);
+                    end
+            
+                    % ===== Display result =====
+                    imgToShow = imread(outputPath);   % show last saved
+                    titleText = ['Detected: ', extractBefore(summaryText, strlength(summaryText))];
+            
+                    data.outputPath = outputPath;
+            
+                catch ME
+                    error("YOLOv8 failed:\n%s", ME.message);
+                end
+            
+                delete(tempImagePath);
+                set(data.nextButton,'Enable','off');
+                set(data.backButton,'Enable','off');
+
+
+
+        otherwise
+            return;
+    end
+
+    imshow(imgToShow, 'Parent', data.ax);
+    title(data.ax, titleText);
+    data = storeThumbnail(fig, data, imgToShow, titleText);
+
+    data.stepCounter = data.stepCounter + 1;
+    if data.stepCounter > 1
+        set(data.backButton, 'Enable', 'on');
+    end
+    guidata(fig, data);
+    drawnow;
+end
+
+%% ======== BACK Button Function ========
+function backStep(fig)
+    data = guidata(fig);
+    data.stepCounter = data.stepCounter - 1;
+
+    switch data.stepCounter
+        case 1
+            imgToShow = data.org_img;
+            titleText = 'Input Image';
+        case 2
+            imgToShow = data.red_comp_img;
+            titleText = 'Red Compensated Image';
+        case 3
+            imgToShow = data.wb_img;
+            titleText = 'White Balanced Image';
+        case 4
+            imgToShow = data.gamma_crct_img;
+            titleText = 'Enhanced Image';
+        case 5
+            imgToShow = data.sharpen_img;
+            titleText = 'Sharpened Image';
+        case 6
+            imgToShow = data.gray_img;
+            titleText = 'Grayscale Image';
+        case 7
+            imgToShow = data.edges;
+            titleText = 'Edge Detection';
+        case 8
+            imgToShow = data.filled_img;
+            titleText = 'Morphologically Processed Image';
+    end
+
+    imshow(imgToShow, 'Parent', data.ax);
+    title(data.ax, titleText);
+
+    if data.stepCounter == 1
+        set(data.backButton, 'Enable', 'off');
+    end
+    set(data.nextButton, 'Enable', 'on');
+    guidata(fig, data);
+    drawnow;
+end
+
+%% ======== Store Thumbnail (2 Columns) ========
+function data = storeThumbnail(fig, data, img, stepTitle)
+    thumbSize = [100, 100];
+    thumbImg = imresize(img, thumbSize);
+
+    idx = numel(data.thumbAxes) + 1;
+    col = mod(idx-1, 2);
+    row = floor((idx-1)/2);
+
+    xPos = 10 + col * 110;
+    yPos = 520 - row * 120;
+
+    ax = axes('Parent', data.thumbPanel, 'Units', 'pixels', ...
+        'Position', [xPos, yPos, 100, 100], 'XTick', [], 'YTick', []);
+    hImg = imshow(thumbImg, 'Parent', ax);
+    title(ax, num2str(idx), 'FontSize', 8);
+
+    set(hImg, 'ButtonDownFcn', @(~,~) showImage(fig, img, stepTitle));
+    set(ax, 'ButtonDownFcn', @(~,~) showImage(fig, img, stepTitle));
+
+    data.thumbAxes{end+1} = ax;
+end
+
+%% ======== Show Full Image from Thumbnail ========
+function showImage(fig, img, stepTitle)
+    data = guidata(fig);
+    imshow(img, 'Parent', data.ax);
+    title(data.ax, stepTitle);
+    drawnow;
+end
